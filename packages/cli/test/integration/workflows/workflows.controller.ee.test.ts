@@ -23,7 +23,7 @@ import { createAdmin, createOwner, createUser, createUserShell } from '../shared
 import { createWorkflow, getWorkflowSharing, shareWorkflowWithUsers } from '../shared/db/workflows';
 import { createTag } from '../shared/db/tags';
 import type { SuperAgentTest } from '../shared/types';
-import { createTeamProject } from '../shared/db/projects';
+import { createTeamProject, linkUserToProject } from '../shared/db/projects';
 import { WorkflowRepository } from '@/databases/repositories/workflow.repository';
 
 let owner: User;
@@ -1245,7 +1245,7 @@ describe('PATCH /workflows/:workflowId - activate workflow', () => {
 
 describe('PUT /:workflowId/transfer', () => {
 	test('cannot transfer into the same project', async () => {
-		const destinationProject = await createTeamProject('Team Project', member);
+		const destinationProject = await createTeamProject('Destination Project', member);
 
 		const workflow = await createWorkflow({}, destinationProject);
 
@@ -1257,9 +1257,7 @@ describe('PUT /:workflowId/transfer', () => {
 	});
 
 	test('cannot transfer into a personal project', async () => {
-		const destinationProject = await createTeamProject('Team Project', member);
-
-		const workflow = await createWorkflow({}, destinationProject);
+		const workflow = await createWorkflow({}, member);
 
 		await testServer
 			.authAgentFor(member)
@@ -1268,8 +1266,8 @@ describe('PUT /:workflowId/transfer', () => {
 			.expect(400);
 	});
 
-	test('cannot transfer without workflow:move scope for the workflow', async () => {
-		const destinationProject = await createTeamProject('Team Project', member);
+	test('cannot transfer somebody elses credentials', async () => {
+		const destinationProject = await createTeamProject('Destination Project', member);
 
 		const workflow = await createWorkflow({}, anotherMember);
 
@@ -1280,10 +1278,24 @@ describe('PUT /:workflowId/transfer', () => {
 			.expect(403);
 	});
 
-	test('cannot transfer without workflow:create scope in destination project', async () => {
-		const destinationProject = await createTeamProject('Team Project', anotherMember);
+	test("cannot transfer if you're not an admin in the source project", async () => {
+		const sourceProject = await createTeamProject('Source Project');
+		await linkUserToProject(member, sourceProject, 'project:editor');
+		const workflow = await createWorkflow({}, sourceProject);
 
+		const destinationProject = await createTeamProject('Destination Project', member);
+
+		await testServer
+			.authAgentFor(member)
+			.put(`/workflows/${workflow.id}/transfer`)
+			.send({ destinationProjectId: destinationProject.id })
+			.expect(403);
+	});
+
+	test("cannot transfer if you're not a member of the destination project", async () => {
 		const workflow = await createWorkflow({}, member);
+
+		const destinationProject = await createTeamProject('Destination Project');
 
 		await testServer
 			.authAgentFor(member)
@@ -1296,12 +1308,12 @@ describe('PUT /:workflowId/transfer', () => {
 		//
 		// ARRANGE
 		//
-		const destinationProject = await createTeamProject('Team Project', member);
-
 		const workflow = await createWorkflow({}, member);
 
 		// all other sharings should be deleted by the transfer
 		await shareWorkflowWithUsers(workflow, [anotherMember]);
+
+		const destinationProject = await createTeamProject('Team Project', member);
 
 		//
 		// ACT
@@ -1331,9 +1343,9 @@ describe('PUT /:workflowId/transfer', () => {
 		// ARRANGE
 		//
 		const sourceProject = await createTeamProject('Team Project 1', member);
-		const destinationProject = await createTeamProject('Team Project 2', member);
-
 		const workflow = await createWorkflow({}, sourceProject);
+
+		const destinationProject = await createTeamProject('Team Project 2', member);
 
 		//
 		// ACT
@@ -1368,10 +1380,11 @@ describe('PUT /:workflowId/transfer', () => {
 			// ARRANGE
 			//
 			const sourceProject = await createTeamProject('Source Project', member);
-			const destinationProject = await createTeamProject('Destination Project', member);
-
 			const teamWorkflow = await createWorkflow({}, sourceProject);
+
 			const personalWorkflow = await createWorkflow({}, member);
+
+			const destinationProject = await createTeamProject('Destination Project', member);
 
 			//
 			// ACT
@@ -1423,10 +1436,11 @@ describe('PUT /:workflowId/transfer', () => {
 		// ARRANGE
 		//
 		const sourceProject = await createTeamProject('Source Project', member);
-		const destinationProject = anotherMemberPersonalProject;
-
 		const teamWorkflow = await createWorkflow({}, sourceProject);
+
 		const personalWorkflow = await createWorkflow({}, member);
+
+		const destinationProject = anotherMemberPersonalProject;
 
 		//
 		// ACT & ASSERT
